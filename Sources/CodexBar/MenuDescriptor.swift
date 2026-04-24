@@ -58,6 +58,7 @@ struct MenuDescriptor {
         case statusPage
         case changelog
         case addCodexAccount
+        case addCodexAccountViaDeviceCode
         case requestCodexSystemPromotion(UUID)
         case addProviderAccount(UsageProvider)
         case switchAccount(UsageProvider)
@@ -537,7 +538,22 @@ struct MenuDescriptor {
             if let loginContext,
                let override = implementation.loginMenuAction(context: loginContext)
             {
-                entries.append(.action(override.label, override.action))
+                // Codex's managed login has two entry points (browser + native
+                // device code), so we render a submenu instead of a single
+                // action. Other providers continue to use the single-action path.
+                if targetProvider == .codex, override.action == .addCodexAccount {
+                    entries.append(.submenu(
+                        override.label,
+                        MenuDescriptor.MenuActionSystemImage.addAccount.rawValue,
+                        [
+                            SubmenuItem(title: "Sign in with Browser", action: .addCodexAccount),
+                            SubmenuItem(
+                                title: "Sign in with Device Code",
+                                action: .addCodexAccountViaDeviceCode),
+                        ]))
+                } else {
+                    entries.append(.action(override.label, override.action))
+                }
             } else {
                 let loginAction = self.switchAccountTarget(for: provider, store: store)
                 let hasAccount = self.hasAccount(for: provider, store: store, account: fallbackAccount)
@@ -699,7 +715,8 @@ extension MenuDescriptor.MenuAction {
         case .dashboard: MenuDescriptor.MenuActionSystemImage.dashboard.rawValue
         case .statusPage: MenuDescriptor.MenuActionSystemImage.statusPage.rawValue
         case .changelog: MenuDescriptor.MenuActionSystemImage.changelog.rawValue
-        case .addCodexAccount, .addProviderAccount: MenuDescriptor.MenuActionSystemImage.addAccount.rawValue
+        case .addCodexAccount, .addCodexAccountViaDeviceCode, .addProviderAccount:
+            MenuDescriptor.MenuActionSystemImage.addAccount.rawValue
         case .requestCodexSystemPromotion:
             nil
         case .switchAccount: MenuDescriptor.MenuActionSystemImage.switchAccount.rawValue

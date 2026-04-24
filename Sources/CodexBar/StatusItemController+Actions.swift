@@ -221,6 +221,42 @@ extension StatusItemController: StatusItemMenuPersistentActionDelegate {
         }
     }
 
+    @objc func addManagedCodexAccountViaDeviceCodeFromMenu(_: NSMenuItem) {
+        guard self.codexAccountPromotionCoordinator.isInteractionBlocked() == false else {
+            self.loginLogger.info("Device-code Add Account tap ignored: account change already in-flight")
+            return
+        }
+        guard self.settings.hasUnreadableManagedCodexAccountStore == false else {
+            self.presentLoginAlert(
+                title: "Managed Codex accounts unavailable",
+                message: "CodexBar could not read managed account storage. " +
+                    "Recover the store before adding another account.")
+            return
+        }
+
+        // The device-auth sheet lives on the Preferences Providers pane. Open
+        // it so the `.sheet(item: coordinator.activeDeviceAuthSession)`
+        // binding can surface the code to the user; otherwise the flow would
+        // run invisibly and leave the user with no way to read the code.
+        self.openSettings(tab: .providers)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let account = try await self.managedCodexAccountCoordinator
+                    .authenticateManagedAccountWithDeviceFlow()
+                self.settings.selectAuthenticatedManagedCodexAccount(account)
+                await ProviderInteractionContext.$current.withValue(.userInitiated) {
+                    await self.store.refreshCodexAccountScopedState(allowDisabled: true)
+                }
+            } catch is CancellationError {
+                // User cancelled the sheet — no alert.
+            } catch {
+                self.presentManagedCodexAccountError(error)
+            }
+        }
+    }
+
     @objc func requestCodexSystemPromotionFromMenu(_ sender: NSMenuItem) {
         guard let rawManagedAccountID = sender.representedObject as? String,
               let managedAccountID = UUID(uuidString: rawManagedAccountID)

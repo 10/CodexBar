@@ -10,6 +10,8 @@ extension StatusItemController {
         case .statusPage: (#selector(self.openStatusPage), nil)
         case .changelog: (#selector(self.openChangelog), nil)
         case .addCodexAccount: (#selector(self.addManagedCodexAccountFromMenu(_:)), nil)
+        case .addCodexAccountViaDeviceCode:
+            (#selector(self.addManagedCodexAccountViaDeviceCodeFromMenu(_:)), nil)
         case let .addProviderAccount(provider): (#selector(self.runSwitchAccount(_:)), provider.rawValue)
         case let .requestCodexSystemPromotion(managedAccountID):
             (#selector(self.requestCodexSystemPromotionFromMenu(_:)), managedAccountID.uuidString)

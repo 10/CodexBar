@@ -459,6 +459,9 @@
 "managed_login_missing_email" = "Codex 登录已完成，但无法获取账户邮箱。请在确认账户已完全登录后重试。";
 "workspace_selection_cancelled" = "CodexBar 发现多个工作区，但未选择任何工作区。";
 "unsafe_managed_home" = "CodexBar 拒绝修改意外的托管主目录路径：%@";
+"codex_device_flow_timed_out" = "设备代码已过期。请重试。";
+"codex_device_flow_request_failed" = "Codex 设备认证服务器返回状态 %d。请重试。";
+"codex_device_flow_invalid_response" = "Codex 设备认证服务器返回了意外响应。请重试。";
 "menu_bar_metric_title" = "菜单栏指标";
 "menu_bar_metric_subtitle" = "选择哪个窗口驱动菜单栏百分比。";
 "menu_bar_metric_subtitle_deepseek" = "在菜单栏显示 DeepSeek 余额。";

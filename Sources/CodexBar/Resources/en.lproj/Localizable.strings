@@ -466,6 +466,9 @@
 "login_success_notification_body" = "You can return to the app; authentication finished.";
 "workspace_selection_cancelled" = "CodexBar found multiple workspaces, but no workspace was selected.";
 "unsafe_managed_home" = "CodexBar refused to modify an unexpected managed home path: %@";
+"codex_device_flow_timed_out" = "Device code expired. Please try again.";
+"codex_device_flow_request_failed" = "Codex device-auth server responded with status %d. Please try again.";
+"codex_device_flow_invalid_response" = "Unexpected response from Codex device-auth server. Please try again.";
 "menu_bar_metric_title" = "Menu bar metric";
 "menu_bar_metric_subtitle" = "Choose which window drives the menu bar percent.";
 "menu_bar_metric_subtitle_deepseek" = "Shows the DeepSeek balance in the menu bar.";

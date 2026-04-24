@@ -39,6 +39,18 @@ enum ManagedCodexAccountServiceError: Error, Equatable {
     case missingEmail
     case workspaceSelectionCancelled
     case unsafeManagedHome(String)
+    case deviceFlowTimedOut
+    case deviceFlowRequestFailed(status: Int)
+    case deviceFlowInvalidResponse
+}
+
+/// Progress phases surfaced to the coordinator / UI during a device-auth
+/// login. The runner tells the service when to update each step; the service
+/// forwards them through the `progress` closure provided by the caller.
+enum ManagedCodexDeviceFlowProgress: Equatable {
+    case requestingCode
+    case awaitingUser(userCode: String, verificationURL: URL)
+    case exchangingTokens
 }
 
 extension ManagedCodexAccountServiceError {
@@ -52,6 +64,12 @@ extension ManagedCodexAccountServiceError {
             L("workspace_selection_cancelled")
         case let .unsafeManagedHome(path):
             String(format: L("unsafe_managed_home"), path)
+        case .deviceFlowTimedOut:
+            L("codex_device_flow_timed_out")
+        case let .deviceFlowRequestFailed(status):
+            String(format: L("codex_device_flow_request_failed"), status)
+        case .deviceFlowInvalidResponse:
+            L("codex_device_flow_invalid_response")
         }
     }
 }
@@ -200,6 +218,7 @@ final class ManagedCodexAccountService {
     private let store: any ManagedCodexAccountStoring
     private let homeFactory: any ManagedCodexHomeProducing
     private let loginRunner: any ManagedCodexLoginRunning
+    private let deviceFlowRunner: any ManagedCodexDeviceFlowRunning
     private let identityReader: any ManagedCodexIdentityReading
     private let workspaceResolver: any ManagedCodexWorkspaceResolving
     private let workspaceSelector: any ManagedCodexWorkspaceSelecting
@@ -209,6 +228,7 @@ final class ManagedCodexAccountService {
         store: any ManagedCodexAccountStoring,
         homeFactory: any ManagedCodexHomeProducing,
         loginRunner: any ManagedCodexLoginRunning,
+        deviceFlowRunner: any ManagedCodexDeviceFlowRunning = DefaultManagedCodexDeviceFlowRunner(),
         identityReader: any ManagedCodexIdentityReading,
         workspaceResolver: any ManagedCodexWorkspaceResolving = DefaultManagedCodexWorkspaceResolver(),
         workspaceSelector: any ManagedCodexWorkspaceSelecting = CodexWorkspaceAlertSelector(),
@@ -217,6 +237,7 @@ final class ManagedCodexAccountService {
         self.store = store
         self.homeFactory = homeFactory
         self.loginRunner = loginRunner
+        self.deviceFlowRunner = deviceFlowRunner
         self.identityReader = identityReader
         self.workspaceResolver = workspaceResolver
         self.workspaceSelector = workspaceSelector
@@ -228,6 +249,7 @@ final class ManagedCodexAccountService {
             store: FileManagedCodexAccountStore(fileManager: fileManager),
             homeFactory: ManagedCodexHomeFactory(fileManager: fileManager),
             loginRunner: DefaultManagedCodexLoginRunner(),
+            deviceFlowRunner: DefaultManagedCodexDeviceFlowRunner(),
             identityReader: DefaultManagedCodexIdentityReader(),
             workspaceResolver: DefaultManagedCodexWorkspaceResolver(),
             workspaceSelector: CodexWorkspaceAlertSelector(),
@@ -249,69 +271,12 @@ final class ManagedCodexAccountService {
             let result = await self.loginRunner.run(homePath: homeURL.path, timeout: timeout)
             guard case .success = result.outcome else { throw ManagedCodexAccountServiceError.loginFailed(result) }
 
-            let identity = try self.identityReader.loadAccountIdentity(homePath: homeURL.path)
-            guard let rawEmail = identity.email?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !rawEmail.isEmpty
-            else {
-                throw ManagedCodexAccountServiceError.missingEmail
-            }
-            let authenticatedProviderAccountID: String? = switch identity.identity {
-            case let .providerAccount(id):
-                ManagedCodexAccount.normalizeProviderAccountID(id)
-            case .emailOnly, .unresolved:
-                nil
-            }
-            let selectedWorkspace = try await self.selectedWorkspaceIdentity(
-                email: rawEmail,
-                homePath: homeURL.path,
-                authenticatedProviderAccountID: authenticatedProviderAccountID)
-            let providerAccountID = selectedWorkspace?.workspaceAccountID ?? authenticatedProviderAccountID
-            let workspaceIdentity: CodexOpenAIWorkspaceIdentity? = if let selectedWorkspace {
-                selectedWorkspace
-            } else {
-                await self.resolvedWorkspaceIdentity(
-                    homePath: homeURL.path,
-                    providerAccountID: providerAccountID)
-            }
-
-            let now = Date().timeIntervalSince1970
-            let existing = self.reconciledExistingAccount(
-                authenticatedEmail: rawEmail,
-                providerAccountID: providerAccountID,
-                existingAccountID: existingAccountID,
-                snapshot: snapshot)
-            let persistedMetadata = self.persistedProviderMetadata(
-                authenticatedProviderAccountID: providerAccountID,
-                resolvedWorkspaceIdentity: workspaceIdentity,
-                existingAccount: existing)
-
-            account = ManagedCodexAccount(
-                id: existing?.id ?? UUID(),
-                email: rawEmail,
-                providerAccountID: persistedMetadata.providerAccountID,
-                workspaceLabel: persistedMetadata.workspaceLabel,
-                workspaceAccountID: persistedMetadata.workspaceAccountID,
-                authFingerprint: CodexAuthFingerprint.fingerprint(
-                    homePath: homeURL.path,
-                    fileManager: self.fileManager),
-                managedHomePath: homeURL.path,
-                createdAt: existing?.createdAt ?? now,
-                updatedAt: now,
-                lastAuthenticatedAt: now)
-            let replacedAccountIDs = self.replacedAccountIDs(
-                authenticatedEmail: rawEmail,
-                providerAccountID: providerAccountID,
-                existingAccountID: existingAccountID,
-                matchedAccountID: existing?.id,
-                snapshot: snapshot)
-            existingHomePathsToDelete = snapshot.accounts
-                .filter { replacedAccountIDs.contains($0.id) }
-                .map(\.managedHomePath)
-
-            let updatedSnapshot = ManagedCodexAccountSet(
-                version: snapshot.version,
-                accounts: snapshot.accounts.filter { replacedAccountIDs.contains($0.id) == false } + [account])
-            try self.store.storeAccounts(updatedSnapshot)
+            let reconciled = try await self.reconcileAuthenticatedIdentity(
+                snapshot: snapshot,
+                homeURL: homeURL,
+                existingAccountID: existingAccountID)
+            account = reconciled.account
+            existingHomePathsToDelete = reconciled.existingHomePathsToDelete
         } catch {
             try? self.removeManagedHomeIfSafe(atPath: homeURL.path)
             throw error
@@ -321,6 +286,116 @@ final class ManagedCodexAccountService {
             try? self.removeManagedHomeIfSafe(atPath: existingHomePathToDelete)
         }
         return account
+    }
+
+    /// Authenticates a managed Codex account using the native OAuth 2.0
+    /// Device Authorization Grant, bypassing the `codex login` subprocess.
+    ///
+    /// The device flow runner fetches a user code, surfaces it through the
+    /// `progress` closure, and polls until the user authorizes on another
+    /// device or the session deadline is reached. Once tokens are exchanged
+    /// we write them to the managed `auth.json` and then re-enter the same
+    /// identity / workspace / reconciliation pipeline used by the CLI path.
+    func authenticateManagedAccountWithDeviceFlow(
+        existingAccountID: UUID? = nil,
+        sessionTimeout: TimeInterval = 15 * 60,
+        progress: @MainActor @escaping (ManagedCodexDeviceFlowProgress) -> Void)
+        async throws -> ManagedCodexAccount
+    {
+        let snapshot = try self.store.loadAccounts()
+        let homeURL = self.homeFactory.makeHomeURL()
+        try self.fileManager.createDirectory(at: homeURL, withIntermediateDirectories: true)
+        let account: ManagedCodexAccount
+        let existingHomePathsToDelete: [String]
+
+        do {
+            progress(.requestingCode)
+            let deviceCode: CodexDeviceFlow.DeviceCodeResponse
+            do {
+                deviceCode = try await self.deviceFlowRunner.requestDeviceCode()
+            } catch let error as CodexDeviceFlow.Error {
+                throw Self.mapDeviceFlowError(error)
+            }
+
+            progress(.awaitingUser(
+                userCode: deviceCode.userCode,
+                verificationURL: deviceCode.verificationURL))
+
+            let credentials: CodexOAuthCredentials
+            do {
+                credentials = try await self.deviceFlowRunner.pollForTokens(
+                    deviceAuthID: deviceCode.deviceAuthID,
+                    userCode: deviceCode.userCode,
+                    intervalSeconds: deviceCode.intervalSeconds,
+                    deadline: Date().addingTimeInterval(sessionTimeout))
+            } catch let error as CodexDeviceFlow.Error {
+                throw Self.mapDeviceFlowError(error)
+            }
+
+            progress(.exchangingTokens)
+
+            let scopedEnv = CodexHomeScope.scopedEnvironment(
+                base: ProcessInfo.processInfo.environment,
+                codexHome: homeURL.path)
+            try CodexOAuthCredentialsStore.save(credentials, env: scopedEnv)
+
+            let reconciled = try await self.reconcileAuthenticatedIdentity(
+                snapshot: snapshot,
+                homeURL: homeURL,
+                existingAccountID: existingAccountID)
+            account = reconciled.account
+            existingHomePathsToDelete = reconciled.existingHomePathsToDelete
+        } catch {
+            try? self.removeManagedHomeIfSafe(atPath: homeURL.path)
+            throw error
+        }
+
+        for existingHomePathToDelete in existingHomePathsToDelete where existingHomePathToDelete != homeURL.path {
+            try? self.removeManagedHomeIfSafe(atPath: existingHomePathToDelete)
+        }
+        return account
+    }
+
+    /// Runs the device-auth flow against the ambient Codex home
+    /// (`~/.codex/` unless `CODEX_HOME` is set) and writes the tokens in
+    /// place, without touching CodexBar's managed account store.
+    ///
+    /// This is the native equivalent of `codex login` on a non-managed
+    /// system account: it overwrites the same `auth.json` the CLI would
+    /// overwrite. Caller is responsible for any post-save refresh of
+    /// CodexBar state.
+    func authenticateAmbientCodexAccountWithDeviceFlow(
+        sessionTimeout: TimeInterval = 15 * 60,
+        progress: @MainActor @escaping (ManagedCodexDeviceFlowProgress) -> Void)
+        async throws
+    {
+        progress(.requestingCode)
+        let deviceCode: CodexDeviceFlow.DeviceCodeResponse
+        do {
+            deviceCode = try await self.deviceFlowRunner.requestDeviceCode()
+        } catch let error as CodexDeviceFlow.Error {
+            throw Self.mapDeviceFlowError(error)
+        }
+
+        progress(.awaitingUser(
+            userCode: deviceCode.userCode,
+            verificationURL: deviceCode.verificationURL))
+
+        let credentials: CodexOAuthCredentials
+        do {
+            credentials = try await self.deviceFlowRunner.pollForTokens(
+                deviceAuthID: deviceCode.deviceAuthID,
+                userCode: deviceCode.userCode,
+                intervalSeconds: deviceCode.intervalSeconds,
+                deadline: Date().addingTimeInterval(sessionTimeout))
+        } catch let error as CodexDeviceFlow.Error {
+            throw Self.mapDeviceFlowError(error)
+        }
+
+        progress(.exchangingTokens)
+
+        // Ambient env = no `CODEX_HOME` override → writes to `~/.codex/auth.json`.
+        try CodexOAuthCredentialsStore.save(credentials, env: ProcessInfo.processInfo.environment)
     }
 
     func removeManagedAccount(id: UUID) async throws {
@@ -337,6 +412,94 @@ final class ManagedCodexAccountService {
 
         if canDeleteHome, self.fileManager.fileExists(atPath: homeURL.path) {
             try? self.fileManager.removeItem(at: homeURL)
+        }
+    }
+
+    /// Shared post-auth pipeline used by both the CLI login path and the
+    /// native device-auth path. At this point `auth.json` has already been
+    /// written under `homeURL`; we read the identity, resolve the workspace,
+    /// reconcile with any existing entries, and persist.
+    private func reconcileAuthenticatedIdentity(
+        snapshot: ManagedCodexAccountSet,
+        homeURL: URL,
+        existingAccountID: UUID?)
+        async throws -> (account: ManagedCodexAccount, existingHomePathsToDelete: [String])
+    {
+        let identity = try self.identityReader.loadAccountIdentity(homePath: homeURL.path)
+        guard let rawEmail = identity.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawEmail.isEmpty
+        else {
+            throw ManagedCodexAccountServiceError.missingEmail
+        }
+        let authenticatedProviderAccountID: String? = switch identity.identity {
+        case let .providerAccount(id):
+            ManagedCodexAccount.normalizeProviderAccountID(id)
+        case .emailOnly, .unresolved:
+            nil
+        }
+        let selectedWorkspace = try await self.selectedWorkspaceIdentity(
+            email: rawEmail,
+            homePath: homeURL.path,
+            authenticatedProviderAccountID: authenticatedProviderAccountID)
+        let providerAccountID = selectedWorkspace?.workspaceAccountID ?? authenticatedProviderAccountID
+        let workspaceIdentity: CodexOpenAIWorkspaceIdentity? = if let selectedWorkspace {
+            selectedWorkspace
+        } else {
+            await self.resolvedWorkspaceIdentity(
+                homePath: homeURL.path,
+                providerAccountID: providerAccountID)
+        }
+
+        let now = Date().timeIntervalSince1970
+        let existing = self.reconciledExistingAccount(
+            authenticatedEmail: rawEmail,
+            providerAccountID: providerAccountID,
+            existingAccountID: existingAccountID,
+            snapshot: snapshot)
+        let persistedMetadata = self.persistedProviderMetadata(
+            authenticatedProviderAccountID: providerAccountID,
+            resolvedWorkspaceIdentity: workspaceIdentity,
+            existingAccount: existing)
+
+        let account = ManagedCodexAccount(
+            id: existing?.id ?? UUID(),
+            email: rawEmail,
+            providerAccountID: persistedMetadata.providerAccountID,
+            workspaceLabel: persistedMetadata.workspaceLabel,
+            workspaceAccountID: persistedMetadata.workspaceAccountID,
+            authFingerprint: CodexAuthFingerprint.fingerprint(
+                homePath: homeURL.path,
+                fileManager: self.fileManager),
+            managedHomePath: homeURL.path,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now,
+            lastAuthenticatedAt: now)
+        let replacedAccountIDs = self.replacedAccountIDs(
+            authenticatedEmail: rawEmail,
+            providerAccountID: providerAccountID,
+            existingAccountID: existingAccountID,
+            matchedAccountID: existing?.id,
+            snapshot: snapshot)
+        let existingHomePathsToDelete = snapshot.accounts
+            .filter { replacedAccountIDs.contains($0.id) }
+            .map(\.managedHomePath)
+
+        let updatedSnapshot = ManagedCodexAccountSet(
+            version: snapshot.version,
+            accounts: snapshot.accounts.filter { replacedAccountIDs.contains($0.id) == false } + [account])
+        try self.store.storeAccounts(updatedSnapshot)
+
+        return (account, existingHomePathsToDelete)
+    }
+
+    private static func mapDeviceFlowError(_ error: CodexDeviceFlow.Error) -> ManagedCodexAccountServiceError {
+        switch error {
+        case .timedOut:
+            .deviceFlowTimedOut
+        case let .requestFailed(status, _):
+            .deviceFlowRequestFailed(status: status)
+        case .invalidResponse, .missingTokens:
+            .deviceFlowInvalidResponse
         }
     }
 

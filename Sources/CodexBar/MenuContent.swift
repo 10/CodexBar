@@ -122,6 +122,8 @@ struct MenuContent: View {
             self.actions.openChangelog()
         case .addCodexAccount:
             self.actions.addCodexAccount()
+        case .addCodexAccountViaDeviceCode:
+            self.actions.addCodexAccountViaDeviceCode()
         case .requestCodexSystemPromotion:
             return
         case let .addProviderAccount(provider):
@@ -154,6 +156,7 @@ struct MenuActions {
     let openStatusPage: () -> Void
     let openChangelog: () -> Void
     let addCodexAccount: () -> Void
+    let addCodexAccountViaDeviceCode: () -> Void
     let switchAccount: (UsageProvider) -> Void
     let openTerminal: (String) -> Void
     let openSettings: () -> Void
