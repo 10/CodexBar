@@ -1,6 +1,6 @@
-@testable import CodexBarCore
 import Foundation
 import Testing
+@testable import CodexBarCore
 
 @Suite(.serialized)
 struct CodexDeviceFlowTests {
@@ -26,16 +26,16 @@ struct CodexDeviceFlowTests {
     // MARK: - extractChatGPTAccountID
 
     @Test
-    func `extractChatGPTAccountID finds top-level claim in id token`() {
-        let token = Self.makeJWT(payload: ["chatgpt_account_id": "acc-top"])
+    func `extractChatGPTAccountID finds top-level claim in id token`() throws {
+        let token = try Self.makeJWT(payload: ["chatgpt_account_id": "acc-top"])
         #expect(
             CodexDeviceFlow.extractChatGPTAccountID(idToken: token, accessToken: "unused")
                 == "acc-top")
     }
 
     @Test
-    func `extractChatGPTAccountID finds nested openai auth claim`() {
-        let token = Self.makeJWT(payload: [
+    func `extractChatGPTAccountID finds nested openai auth claim`() throws {
+        let token = try Self.makeJWT(payload: [
             "https://api.openai.com/auth": ["chatgpt_account_id": "acc-nested"],
         ])
         #expect(
@@ -44,18 +44,18 @@ struct CodexDeviceFlowTests {
     }
 
     @Test
-    func `extractChatGPTAccountID falls back to access token when id token missing claim`() {
-        let idToken = Self.makeJWT(payload: ["sub": "someone"])
-        let accessToken = Self.makeJWT(payload: ["chatgpt_account_id": "acc-access"])
+    func `extractChatGPTAccountID falls back to access token when id token missing claim`() throws {
+        let idToken = try Self.makeJWT(payload: ["sub": "someone"])
+        let accessToken = try Self.makeJWT(payload: ["chatgpt_account_id": "acc-access"])
         #expect(
             CodexDeviceFlow.extractChatGPTAccountID(idToken: idToken, accessToken: accessToken)
                 == "acc-access")
     }
 
     @Test
-    func `extractChatGPTAccountID returns nil when absent everywhere`() {
-        let idToken = Self.makeJWT(payload: ["sub": "nobody"])
-        let accessToken = Self.makeJWT(payload: ["sub": "nobody"])
+    func `extractChatGPTAccountID returns nil when absent everywhere`() throws {
+        let idToken = try Self.makeJWT(payload: ["sub": "nobody"])
+        let accessToken = try Self.makeJWT(payload: ["sub": "nobody"])
         #expect(
             CodexDeviceFlow.extractChatGPTAccountID(idToken: idToken, accessToken: accessToken) == nil)
     }
@@ -90,7 +90,7 @@ struct CodexDeviceFlowTests {
             CodexDeviceFlowStubURLProtocol.reset()
         }
 
-        let idToken = Self.makeJWT(payload: [
+        let idToken = try Self.makeJWT(payload: [
             "https://api.openai.com/auth": ["chatgpt_account_id": "acc-123"],
         ])
         let tokenResponseBody = """
@@ -237,9 +237,9 @@ struct CodexDeviceFlowTests {
         return URLSession(configuration: config)
     }
 
-    private static func makeJWT(payload: [String: Any]) -> String {
+    private static func makeJWT(payload: [String: Any]) throws -> String {
         let header = Data(#"{"alg":"none"}"#.utf8)
-        let payloadData = try! JSONSerialization.data(withJSONObject: payload)
+        let payloadData = try JSONSerialization.data(withJSONObject: payload)
         let signature = Data("sig".utf8)
         return [header, payloadData, signature]
             .map { Self.base64URLEncode($0) }

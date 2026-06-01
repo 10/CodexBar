@@ -780,12 +780,11 @@ struct ProvidersPane: View {
         }
 
         if let error = error as? ManagedCodexAccountServiceError {
-            let tone: CodexAccountsSectionNotice.Tone
-            switch error {
+            let tone: CodexAccountsSectionNotice.Tone = switch error {
             case .deviceFlowTimedOut:
-                tone = .secondary
+                .secondary
             default:
-                tone = .warning
+                .warning
             }
             return CodexAccountsSectionNotice(text: error.userFacingMessage, tone: tone)
         }

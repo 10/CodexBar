@@ -14,12 +14,12 @@ struct ManagedCodexAccountServiceDeviceFlowTests {
         let store = FileManagedCodexAccountStore(
             fileURL: root.appendingPathComponent("managed.json"),
             fileManager: .default)
-        let deviceFlowRunner = StubManagedCodexDeviceFlowRunner(
+        let deviceFlowRunner = try StubManagedCodexDeviceFlowRunner(
             deviceCode: CodexDeviceFlow.DeviceCodeResponse(
                 userCode: "CODE-1234",
                 deviceAuthID: "auth-id",
                 intervalSeconds: 5,
-                verificationURL: URL(string: "https://auth.openai.com/codex/device?user_code=CODE-1234")!),
+                verificationURL: #require(URL(string: "https://auth.openai.com/codex/device?user_code=CODE-1234"))),
             credentials: CodexOAuthCredentials(
                 accessToken: "access-abc",
                 refreshToken: "refresh-abc",
@@ -52,9 +52,9 @@ struct ManagedCodexAccountServiceDeviceFlowTests {
         let recorded = phases.snapshot()
         #expect(recorded.count == 3)
         #expect(recorded.first == .requestingCode)
-        #expect(recorded[1] == .awaitingUser(
+        #expect(try recorded[1] == .awaitingUser(
             userCode: "CODE-1234",
-            verificationURL: URL(string: "https://auth.openai.com/codex/device?user_code=CODE-1234")!))
+            verificationURL: #require(URL(string: "https://auth.openai.com/codex/device?user_code=CODE-1234"))))
         #expect(recorded.last == .exchangingTokens)
 
         let authFile = URL(fileURLWithPath: account.managedHomePath)
@@ -80,12 +80,12 @@ struct ManagedCodexAccountServiceDeviceFlowTests {
             fileURL: root.appendingPathComponent("managed.json"),
             fileManager: .default)
         let homeFactory = TestManagedCodexHomeFactoryForDeviceFlow(root: root)
-        let deviceFlowRunner = StubManagedCodexDeviceFlowRunner(
+        let deviceFlowRunner = try StubManagedCodexDeviceFlowRunner(
             deviceCode: CodexDeviceFlow.DeviceCodeResponse(
                 userCode: "CODE-1234",
                 deviceAuthID: "auth-id",
                 intervalSeconds: 5,
-                verificationURL: URL(string: "https://auth.openai.com/codex/device?user_code=CODE-1234")!),
+                verificationURL: #require(URL(string: "https://auth.openai.com/codex/device?user_code=CODE-1234"))),
             credentials: nil,
             pollError: CodexDeviceFlow.Error.timedOut)
         let service = ManagedCodexAccountService(

@@ -78,7 +78,7 @@ public struct CodexDeviceFlow: Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw Error.invalidResponse
         }
-        guard (200 ..< 300).contains(http.statusCode) else {
+        guard (200..<300).contains(http.statusCode) else {
             throw Error.requestFailed(status: http.statusCode, body: Self.responseBodyString(data))
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -158,7 +158,7 @@ public struct CodexDeviceFlow: Sendable {
                 // Unknown error in body — fall through and treat as failure below.
             }
 
-            guard (200 ..< 300).contains(http.statusCode) else {
+            guard (200..<300).contains(http.statusCode) else {
                 throw Error.requestFailed(status: http.statusCode, body: Self.responseBodyString(data))
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -197,7 +197,7 @@ public struct CodexDeviceFlow: Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw Error.invalidResponse
         }
-        guard (200 ..< 300).contains(http.statusCode) else {
+        guard (200..<300).contains(http.statusCode) else {
             throw Error.requestFailed(status: http.statusCode, body: Self.responseBodyString(data))
         }
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -246,7 +246,7 @@ public struct CodexDeviceFlow: Sendable {
     /// `https://api.openai.com/auth` claim used by ChatGPT tokens.
     /// Returns nil when absent — callers must tolerate missing IDs.
     static func extractChatGPTAccountID(idToken: String?, accessToken: String) -> String? {
-        for token in [idToken, accessToken].compactMap({ $0 }) {
+        for token in [idToken, accessToken].compactMap(\.self) {
             if let id = self.chatGPTAccountID(fromJWT: token) {
                 return id
             }

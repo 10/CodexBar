@@ -79,7 +79,6 @@ struct CodexDeviceAuthSheetView: View {
         }
     }
 
-    @ViewBuilder
     private func awaitingUserContent(userCode: String, verificationURL: URL) -> some View {
         VStack(spacing: 14) {
             Button {

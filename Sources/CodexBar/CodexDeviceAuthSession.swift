@@ -20,9 +20,9 @@ final class CodexDeviceAuthSession: Identifiable {
 
     let id = UUID()
     private(set) var phase: Phase = .requestingCode
-    // Stored as a type-erased closure because the two auth paths (managed
-    // returns `ManagedCodexAccount`, ambient returns `Void`) produce Tasks
-    // with different success types, and we only need a way to cancel.
+    /// Stored as a type-erased closure because the two auth paths (managed
+    /// returns `ManagedCodexAccount`, ambient returns `Void`) produce Tasks
+    /// with different success types, and we only need a way to cancel.
     private var cancelOwningTask: (() -> Void)?
 
     /// Cancels the underlying authentication task. Tasks that observe
@@ -51,7 +51,7 @@ final class CodexDeviceAuthSession: Identifiable {
         }
     }
 
-    func attach<Success: Sendable>(task: Task<Success, Error>) {
+    func attach(task: Task<some Sendable, Error>) {
         self.cancelOwningTask = { task.cancel() }
     }
 }
