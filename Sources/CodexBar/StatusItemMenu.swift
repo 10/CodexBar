@@ -33,6 +33,13 @@ final class StatusItemMenu: NSMenu {
             self.persistentActionDelegate?.performProviderNavigation(direction)
             return true
         }
+        if let index = Self.providerSelectionIndex(for: event),
+           let switcherView = self.items.first?.view as? ProviderSwitcherView
+        {
+            return MainActor.assumeIsolated {
+                switcherView.handleKeyboardSelection(at: index)
+            }
+        }
 
         return super.performKeyEquivalent(with: event)
     }
